@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>J3 Industries</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>emailjs.init("cLeiH4SZ7kqiNdch0");</script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',sans-serif;background:#F2F0EC;color:#1B3A2B;min-height:100vh;font-size:14px}
@@ -544,12 +546,20 @@ function logN(msg) {
 }
 
 function notify(subj, body) {
-  var url = 'mailto:7134692810@vtext.com?from=' + encodeURIComponent('jameshinton@gmail.com')
-    + '&subject=' + encodeURIComponent(subj)
-    + '&body=' + encodeURIComponent(body);
-  var a = document.createElement('a'); a.href=url; a.style.display='none';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  logN('Notified: '+subj);
+  // Send via EmailJS to Verizon email-to-SMS gateway
+  emailjs.send('j3industries', 'x2vhx59', {
+    subject: subj,
+    message: body,
+    to_email: '7134692810@vtext.com'
+  }).then(function() {
+    logN('SMS sent: ' + subj);
+  }, function(err) {
+    logN('SMS error: ' + JSON.stringify(err));
+    // Fallback: open mailto
+    var url = 'mailto:7134692810@vtext.com?subject=' + encodeURIComponent(subj) + '&body=' + encodeURIComponent(body);
+    var a = document.createElement('a'); a.href=url; a.style.display='none';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  });
 }
 
 function nBook(w) {
