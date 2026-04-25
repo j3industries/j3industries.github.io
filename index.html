@@ -8,7 +8,8 @@
 
 
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
-<script>emailjs.init("cLeiH4SZ7kqiNdch0");
+<script>
+emailjs.init("cLeiH4SZ7kqiNdch0");
 // Firebase Realtime Database via REST API — no SDK needed
 var DB_URL = 'https://j3industries-534b5-default-rtdb.firebaseio.com';
 var _watchInterval = null;
@@ -58,7 +59,9 @@ function watchOrders() {
         }
       }).catch(function(){});
   }, 15000);
-}</script>
+}
+</script>
+
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'DM Sans',sans-serif;background:#F2F0EC;color:#1B3A2B;min-height:100vh;font-size:14px}
@@ -344,7 +347,7 @@ input[type=checkbox]{width:16px;height:16px;cursor:pointer;accent-color:#1B3A2B;
       <div class="card" id="bform" style="display:none">
         <div class="chdr">New booking &mdash; <span id="flabel" style="color:#2D6A4F;font-weight:400;margin-left:6px;font-size:12px"></span></div>
         <div class="fg2">
-          <div><label>Your name</label><input id="f-name" type="text" placeholder="Your full name"><div class="field-err-msg" id="err-name">Required information field</div></div>
+          <div><label>Full name</label><input id="f-name" type="text" placeholder="Full name"><div class="field-err-msg" id="err-name">Required information field</div></div>
           <div><label>Phone</label><input id="f-phone" type="tel" placeholder="(713) 000-0000"><div class="field-err-msg" id="err-phone">Required information field</div></div>
           <div>
             <label>Carrier</label>
@@ -1382,22 +1385,16 @@ function confirmBooking() {
   if (confirmBtn) { confirmBtn.disabled=true; confirmBtn.textContent='Confirming...'; }
 
   if (!db) { alert('Connection error — please refresh and try again.'); if (confirmBtn){confirmBtn.disabled=false;confirmBtn.textContent='Confirm Booking';} return; }
-  // Atomic booking via REST with ETag optimistic locking
+  // Simple read-check-write (ETag not supported via browser CORS)
   var confirmBtn = document.getElementById('btn-confirm');
+  if (confirmBtn) { confirmBtn.disabled=true; confirmBtn.textContent='Confirming...'; }
 
-  // Step 1: Read with ETag
-  fetch(DB_URL + '/orders.json', {headers: {'X-Firebase-ETag': 'true'}})
-    .then(function(r) {
-      var etag = r.headers.get('ETag');
-      return r.json().then(function(data){ return {data:data, etag:etag}; });
-    })
-    .then(function(result) {
-      var data = result.data || {orders:[], nId:1001};
-      var etag = result.etag;
+  fetch(DB_URL + '/orders.json', {cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      data = data || {orders:[], nId:1001};
       var existing = data.orders || [];
       var nextId = data.nId || 1001;
-
-      // Check for slot conflicts
       var taken = {};
       existing.forEach(function(w) {
         if (w && w.status !== 'cancelled') {
@@ -1410,52 +1407,36 @@ function confirmBooking() {
         for (var j=0; j<newWOs[i].slots.length; j++) {
           if (taken[newWOs[i].key+'|'+newWOs[i].slots[j]]) {
             if (confirmBtn){confirmBtn.disabled=false;confirmBtn.textContent='Confirm Booking';}
-            renderCal(); renderSlots(); updSummary();
+            orders=existing; renderCal(); renderSlots(); updSummary();
             showW('wslot','Sorry — that slot was just booked. Please choose another time.');
             document.getElementById('bform').style.display='none';
-            selSlots=[]; updBookingSummary();
-            return;
+            selSlots=[]; updBookingSummary(); return;
           }
         }
       }
-
-      // Assign IDs
       newWOs.forEach(function(wo){ wo.id=nextId++; existing.push(wo); });
       data.orders=existing; data.nId=nextId;
-
-      // Step 2: Conditional write with ETag
       return fetch(DB_URL + '/orders.json', {
-        method: 'PUT',
-        headers: {'Content-Type':'application/json', 'if-match': etag},
-        body: JSON.stringify(data)
-      }).then(function(r) {
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(data)
+      }).then(function(r2) {
         if (confirmBtn){confirmBtn.disabled=false;confirmBtn.textContent='Confirm Booking';}
-        if (r.status === 412) {
-          // Precondition failed — someone else wrote first, retry
-          renderCal(); renderSlots(); updSummary();
-          showW('wslot','Sorry — that slot was just booked. Please choose another time.');
-          document.getElementById('bform').style.display='none';
-          selSlots=[]; updBookingSummary();
-          return;
-        }
-        if (!r.ok) { logN('Write error: ' + r.status); alert('Booking failed — please try again.'); return; }
-        orders = existing; nId = nextId;
-        newWOs.forEach(function(wo){ nBook(wo); notifyCustConfirm(wo); });
-        ['f-name','f-phone','f-addr','f-note'].forEach(function(id){ document.getElementById(id).value=''; });
+        if (!r2.ok){alert('Booking failed — please try again.');return;}
+        orders=existing; nId=nextId;
+        newWOs.forEach(function(wo){nBook(wo);notifyCustConfirm(wo);});
+        ['f-name','f-phone','f-addr','f-note'].forEach(function(id){document.getElementById(id).value='';});
         document.getElementById('f-carrier').value=''; dogQty=1;
         document.getElementById('f-rec').checked=false;
         selSlots=[]; selSvcs=[]; binQty=1;
         document.getElementById('bform').style.display='none';
-        renderSlots(); renderCal(); updEarn();
-        hideW('wslot'); updSummary();
-        saveOrders();
+        renderSlots(); renderCal(); updEarn(); hideW('wslot'); updSummary();
         logN('Booking confirmed and saved to cloud');
       });
     })
     .catch(function(e){
       if (confirmBtn){confirmBtn.disabled=false;confirmBtn.textContent='Confirm Booking';}
-      logN('Booking error: '+e.message);
-      alert('Booking failed — please try again.');
+      logN('Error: '+e.message); alert('Booking failed — check connection and try again.');
     });
 }
 
@@ -1719,29 +1700,11 @@ cancelWO = function(id) { _origCancelWO(id); saveOrders(); };
 loadOrders();
 watchOrders();
 
-// Inject flyer into iframe and scale to fit
-(function() {
-  var frame = document.getElementById('flyer-frame');
-  if (!frame) return;
-  var flyerHTML = "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<title>J3 Industries</title>\n<link href=\"https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@1,400;1,600&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap\" rel=\"stylesheet\">\n<style>\n@page{size:8.5in 11in;margin:0}\n*{box-sizing:border-box;margin:0;padding:0}\nbody{font-family:\"DM Sans\",sans-serif;background:#FAFAF8;width:8.5in;height:11in;overflow:hidden}\n.page{width:8.5in;height:11in;display:flex;flex-direction:column;padding:0 0 7px}\n.bar{height:7px;background:#1B3A2B;flex-shrink:0}\n\n/* HEADER */\n.header{display:flex;justify-content:space-between;align-items:center;padding:.18in .48in .15in;border-bottom:1px solid #D0CBC2;flex-shrink:0}\n.logo-wrap{display:flex;align-items:center;gap:13px}\n.logo-circle{width:64px;height:64px;border-radius:50%;background:#1B3A2B;border:1.5px solid #9FD4B0;display:flex;align-items:center;justify-content:center;flex-shrink:0}\n.logo-circle span{font-family:\"Cormorant Garamond\",Georgia,serif;font-size:26px;font-style:italic;font-weight:600;color:#FAFAF8;letter-spacing:-1px;line-height:1}\n.logo-text{border-left:.5px solid #D0CBC2;padding-left:13px}\n.logo-name{font-family:\"Cormorant Garamond\",Georgia,serif;font-size:28px;font-style:italic;font-weight:400;color:#1B3A2B;line-height:1;letter-spacing:-.5px}\n.logo-sub{font-family:\"DM Mono\",monospace;font-size:7px;color:#7A907E;letter-spacing:.2em;text-transform:uppercase;margin-top:4px}\n.hdr-right{text-align:right}\n.hdr-phone{font-family:\"Cormorant Garamond\",Georgia,serif;font-size:22px;font-style:italic;font-weight:400;color:#1B3A2B;line-height:1.1}\n.hdr-zones{font-family:\"DM Mono\",monospace;font-size:7px;color:#7A907E;letter-spacing:.1em;text-transform:uppercase;line-height:1.8;margin-top:4px}\n\n/* TAGLINE */\n.tagline{background:#1B3A2B;padding:7px .48in;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-shrink:0}\n.tagline p{font-size:10px;color:#FAFAF8;font-weight:300;white-space:nowrap}\n.tagline strong{font-weight:500;color:#9FD4B0}\n.pill{font-family:\"DM Mono\",monospace;font-size:7px;letter-spacing:.13em;text-transform:uppercase;color:#1B3A2B;background:#9FD4B0;padding:3px 10px;border-radius:20px;white-space:nowrap;flex-shrink:0}\n\n/* BODY */\n.body{flex:1;display:flex;flex-direction:column;padding:0 .48in;min-height:0}\n\n/* INFO CARDS */\n.upper{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;padding:.11in 0 .09in;flex-shrink:0}\n.icard{background:#EEECEA;border:1px solid #DEDAD4;border-radius:5px;padding:9px 11px}\n.icard h3{font-family:\"DM Mono\",monospace;font-size:7px;letter-spacing:.2em;text-transform:uppercase;color:#2D6A4F;margin-bottom:6px;font-weight:500}\n.srow{display:flex;justify-content:space-between;padding:3px 0;border-bottom:.5px solid #D0CBC2}\n.srow:last-child{border-bottom:none}\n.sday{font-size:10px;font-weight:500;color:#1B3A2B}\n.stime{font-family:\"DM Mono\",monospace;font-size:8px;color:#4A7A5A}\n.plist{list-style:none}\n.plist li{display:flex;align-items:flex-start;gap:5px;font-size:9px;color:#2A3A2E;padding:2.5px 0;border-bottom:.5px solid #D0CBC2;line-height:1.4}\n.plist li:last-child{border-bottom:none}\n.chk{width:10px;height:10px;background:#2D6A4F;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}\n.chk::after{content:\"\";width:3px;height:1.5px;border-left:1.5px solid #FAFAF8;border-bottom:1.5px solid #FAFAF8;transform:rotate(-45deg) translateY(-.5px);display:block}\n.bio-name{font-size:10.5px;font-weight:500;color:#1B3A2B;margin-bottom:3px}\n.bio-text{font-size:8.5px;color:#2A3A2E;line-height:1.5}\n\n/* SERVICE GRID \u2014 fixed height tiles, all equal */\n.svc-section{flex:1;display:flex;flex-direction:column;min-height:0}\n.eyebrow{font-family:\"DM Mono\",monospace;font-size:7px;letter-spacing:.22em;text-transform:uppercase;color:#2D6A4F;margin-bottom:5px;font-weight:500;flex-shrink:0}\n.svc-wrap{position:relative;flex:1;min-height:0}\n.watermark{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);opacity:0.04;pointer-events:none;z-index:0}\n.grid{display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr);gap:5px;position:absolute;inset:0;z-index:1}\n.tile{background:#EEECEA;border:1px solid #DEDAD4;border-radius:5px;padding:8px 10px;display:flex;flex-direction:column;overflow:hidden}\n.tile.dark{background:#1B3A2B;border-color:#1B3A2B}\n.t-icon{font-size:22px;line-height:1;margin-bottom:4px;flex-shrink:0}\n.t-name{font-size:11px;font-weight:500;color:#1B3A2B;line-height:1.25;margin-bottom:3px;flex:1}\n.tile.dark .t-name{color:#FAFAF8}\n.t-price{font-size:15px;font-weight:500;color:#2D6A4F;letter-spacing:-.3px;flex-shrink:0}\n.tile.dark .t-price{color:#9FD4B0;font-size:9px;margin-top:2px}\n.t-note{font-family:\"DM Mono\",monospace;font-size:7.5px;color:#7A907E;margin-top:2px;flex-shrink:0}\n.tile.dark .t-note{color:#6AAB82}\n.t-alt{font-family:\"DM Mono\",monospace;font-size:7px;color:#4A7A5A;margin-top:1px;flex-shrink:0}\n.water{color:#2D6A4F;font-weight:700}\n\n/* BELOW GRID */\n.below-grid{flex-shrink:0;padding:.04in 0 .04in}\n.footnote{font-family:\"DM Mono\",monospace;font-size:7px;color:#7A907E;letter-spacing:.05em}\n.click-note{font-family:\"DM Mono\",monospace;font-size:7px;color:#4A7A5A;letter-spacing:.07em;margin-top:2px}\n\n/* FOOTER */\n.footer{background:#2D6A4F;border-radius:5px;padding:9px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-shrink:0;margin-bottom:.10in}\n.footer-text{font-size:9.5px;color:#C8EDD8;line-height:1.6;font-weight:300}\n.footer-text strong{color:#FAFAF8;font-weight:500}\n.fright{display:flex;align-items:center;gap:11px;flex-shrink:0}\n.qr-block{display:flex;flex-direction:column;align-items:center;gap:2px}\n.qr-block img{width:56px;height:56px;display:block;image-rendering:pixelated;background:#FAFAF8;border-radius:3px;padding:2px}\n.qr-lbl{font-family:\"DM Mono\",monospace;font-size:6px;letter-spacing:.1em;text-transform:uppercase;color:#9FD4B0;text-align:center}\n.fline{width:.5px;background:#9FD4B0;align-self:stretch;opacity:.4}\n.cta-lbl{font-family:\"DM Mono\",monospace;font-size:6.5px;letter-spacing:.15em;text-transform:uppercase;color:#9FD4B0;margin-bottom:2px}\n.cta-num{font-family:\"Cormorant Garamond\",Georgia,serif;font-size:18px;font-style:italic;color:#FAFAF8;white-space:nowrap}\n\n@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}}\n</style>\n</head>\n<body>\n<div class=\"page\">\n<div class=\"bar\"></div>\n\n<div class=\"header\">\n  <div class=\"logo-wrap\">\n    <div class=\"logo-circle\"><span>J<span style=\"color:#9FD4B0\">3</span>I</span></div>\n    <div class=\"logo-text\">\n      <div class=\"logo-name\">J3 Industries</div>\n      <div class=\"logo-sub\">Neighborhood Services &middot; Houston</div>\n    </div>\n  </div>\n  <div class=\"hdr-right\">\n    <div class=\"hdr-phone\">(713) 469-2810</div>\n    <div class=\"hdr-zones\">Briargrove &middot; Tanglewood &middot; Briar Bend<br>Serving 77057 &amp; 77035</div>\n  </div>\n</div>\n\n<div class=\"tagline\">\n  <p>Your neighbor James is <strong>reliable, hardworking, and local</strong> &mdash; tackling the tasks on your list so you can enjoy your weekend.</p>\n  <div class=\"pill\">Fri &middot; Sat &middot; Sun</div>\n</div>\n\n<div class=\"body\">\n  <div class=\"upper\">\n    <div class=\"icard\">\n      <h3>Meet J3 Industries</h3>\n      <div class=\"bio-name\">James &mdash; Your Neighbor</div>\n      <div class=\"bio-text\">Hi! I&rsquo;m James, and I live right here in the neighborhood. I started J3 Industries to help my neighbors while doing every job right. Every booking and payment is powered by AI &mdash; scheduling, invoicing, and Venmo payment handled automatically. I show up on time and your invoice arrives the moment the job is done.</div>\n    </div>\n    <div class=\"icard\">\n      <h3>Availability</h3>\n      <div class=\"srow\"><span class=\"sday\">Friday</span><span class=\"stime\">4:30 &ndash; 6:00 PM</span></div>\n      <div class=\"srow\"><span class=\"sday\">Saturday</span><span class=\"stime\">11:00 AM &ndash; 6:00 PM</span></div>\n      <div class=\"srow\"><span class=\"sday\">Sunday</span><span class=\"stime\">11:00 AM &ndash; 6:00 PM</span></div>\n      <div style=\"margin-top:5px;font-family:'DM Mono',monospace;font-size:7px;color:#7A907E;letter-spacing:.07em;line-height:1.6\">Fri, Sat &amp; Sun except holidays<br>30-min slots &middot; recurring plans available</div>\n    </div>\n    <div class=\"icard\">\n      <h3>What to expect</h3>\n      <ul class=\"plist\">\n        <li><span class=\"chk\"></span>Shows up on time, every time</li>\n        <li><span class=\"chk\"></span>Confirmation text before arrival</li>\n        <li><span class=\"chk\"></span>AI-powered invoice on completion</li>\n        <li><span class=\"chk\"></span>Pay via Venmo @jmhintonjr</li>\n        <li><span class=\"chk\"></span>Your neighbor &mdash; accountable &amp; local</li>\n      </ul>\n    </div>\n  </div>\n\n  <div class=\"svc-section\">\n    <div class=\"eyebrow\">Services &amp; pricing</div>\n    <div class=\"svc-wrap\">\n      <div class=\"watermark\">\n        <svg width=\"300\" height=\"300\" viewBox=\"0 0 200 200\" xmlns=\"http://www.w3.org/2000/svg\">\n          <circle cx=\"100\" cy=\"100\" r=\"96\" fill=\"none\" stroke=\"#1B3A2B\" stroke-width=\"2\"/>\n          <circle cx=\"100\" cy=\"100\" r=\"88\" fill=\"none\" stroke=\"#1B3A2B\" stroke-width=\"0.6\"/>\n          <text x=\"18\" y=\"132\" font-family=\"Cormorant Garamond,Georgia,serif\" font-size=\"90\" font-style=\"italic\" font-weight=\"600\" fill=\"#1B3A2B\">J3I</text>\n        </svg>\n      </div>\n      <a style=\"text-decoration:none;color:inherit;display:contents\" href=\"#\" onclick=\"window.parent.postMessage('book','*');return false;\">\n      <div class=\"grid\">\n        <div class=\"tile\"><div class=\"t-icon\">&#128663;</div><div class=\"t-name\">Driveway power wash <span class=\"water\">*</span></div><div class=\"t-price\">$50</div><div class=\"t-note\">1 hour &middot; per session</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128694;</div><div class=\"t-name\">Sidewalk power wash <span class=\"water\">*</span></div><div class=\"t-price\">$25</div><div class=\"t-note\">30 min &middot; per session</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128703;</div><div class=\"t-name\">Trash can power wash <span class=\"water\">*</span></div><div class=\"t-price\">$10 per bin</div><div class=\"t-alt\">$5 for each additional bin</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128705;</div><div class=\"t-name\">Dog bath</div><div class=\"t-price\">$35</div><div class=\"t-note\">per dog &middot; towel dry included</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128396;</div><div class=\"t-name\">Address number painting</div><div class=\"t-price\">$20</div><div class=\"t-note\">per curb &middot; reflective paint</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128054;</div><div class=\"t-name\">Dog walking</div><div class=\"t-price\">$20</div><div class=\"t-note\">30 min &middot; leash-safe routes</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#127810;</div><div class=\"t-name\">Leaf blow &amp; pickup</div><div class=\"t-price\">$20 base price</div><div class=\"t-alt\">Fall pricing may vary</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128682;</div><div class=\"t-name\">Window &amp; shutter wiping <span class=\"water\">*</span></div><div class=\"t-price\">$15</div><div class=\"t-note\">ground floor only</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128375;</div><div class=\"t-name\">Exterior cobweb clearing</div><div class=\"t-price\">$15</div><div class=\"t-note\">eaves, entry, garage doors</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#129716;</div><div class=\"t-name\">Plant watering <span class=\"water\">*</span></div><div class=\"t-price\">$10</div><div class=\"t-note\">per visit &middot; while you travel</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#129681;</div><div class=\"t-name\">Patio furniture wipe-down</div><div class=\"t-price\">$15</div><div class=\"t-note\">per visit</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128465;</div><div class=\"t-name\">Bin rollout &amp; rollin</div><div class=\"t-price\">$10</div><div class=\"t-note\">per week &middot; recurring</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#128230;</div><div class=\"t-name\">Package &amp; mail collection</div><div class=\"t-price\">$10</div><div class=\"t-note\">per visit &middot; while you travel</div></div>\n        <div class=\"tile\"><div class=\"t-icon\">&#129529;</div><div class=\"t-name\">Welcome mat &amp; entry cleanup</div><div class=\"t-price\">$10</div><div class=\"t-note\">beat, sweep, tidy</div></div>\n        <div class=\"tile dark\"><div class=\"t-icon\">&#128197;</div><div class=\"t-name\">Book online</div><div class=\"t-price\">j3industries.github.io/schedule</div><div class=\"t-note\">or scan QR code below &rarr;</div></div>\n        <div class=\"tile dark\"><div class=\"t-icon\" style=\"font-size:22px;font-weight:600;font-family:Georgia,serif;color:#9FD4B0\">$</div><div class=\"t-name\">Venmo only</div><div class=\"t-price\">@jmhintonjr</div><div class=\"t-note\">scan to pay</div></div>\n      </div>\n      </a>\n    </div>\n    <div class=\"below-grid\">\n      <div class=\"footnote\">* Customer to provide access to outdoor water faucet.</div>\n      <div class=\"click-note\">&#9654; Click any service tile to open the online scheduling app</div>\n    </div>\n  </div>\n\n  <div class=\"footer\">\n    <div class=\"footer-text\"><strong>Ready to book?</strong> Scan to text James or scan to schedule online. He&rsquo;ll confirm your slot, arrive ready to work, and send an AI-generated invoice the moment the job is done. <strong>No hassle. Just your neighbor.</strong></div>\n    <div class=\"fright\">\n      <div class=\"qr-block\">\n        <img src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAANwAAADcCAYAAAAbWs+BAAAAAklEQVR4AewaftIAAAShSURBVO3BwW0cOgJEwefGJMIYmABDZwKMgWkYungDWEBz0Lj/yHpVvz4+fv9BUkWQVBMk1QRJNUFSTZBUEyTVBEk1QVJNkFQTJNUESTVBUk2QVBMk1QRJNUFSTZBU8+BFxpr8RHcfPjPW5BXuPryLsSY/0d2HrwqSaoKkmiCpJkiqCZJqgqSaIKkmSKp5UHT34TsZa/KdjDX5qrsPr3D34TsZa9IQJNUESTVBUk2QVBMk1QRJNUFSTZBU8+DNjDVpuPvwE919eBdjTRruPryLIKkmSKoJkmqCpJogqSZIqgmSaoKkmgf6q+4+PDPW5JmxJq8w1uQzdx/09wRJNUFSTZBUEyTVBEk1QVJNkFTzQH/VWJNXuPvwCmNN9N8JkmqCpJogqSZIqgmSaoKkmiCpJkiqefBm7j78S+4+PDPW5BXGmnwndx9+miCpJkiqCZJqgqSaIKkmSKoJkmqCpJoHRWNNfpqxJs/cfXhmrMkzdx+eGWvSMNZE/y9IqgmSaoKkmiCpJkiqCZJqgqSaIKnm18fH7z/oPzXW5Jm7D8+MNfmquw/6e4KkmiCpJkiqCZJqgqSaIKkmSKp58CJjTZ65+/AKY030/+4+PDPW5DNjTZ65+/AKY02eufvwmbEmLXcfvipIqgmSaoKkmiCpJkiqCZJqgqSaIKnmwYvcfXiFsSZfdffhmbEmz9x9+KqxJv+asSavcPfhmbEmn7n78J0ESTVBUk2QVBMk1QRJNUFSTZBUEyTVPHiRsSbP3H34Tsaa/GvuPnxmrMkr3H14hbsPnxlr0nL34auCpJogqSZIqgmSaoKkmiCpJkiqCZJqHrzI3Ydnxpo8c/fhmbEmnxlr8gp3H97FWJNXuPvwVXcfnhlr8gp3H/4lQVJNkFQTJNUESTVBUk2QVBMk1QRJNb8+Pn7/4Y2MNXnm7sNnxpo8c/fhmbEmX3X34ZmxJq9w96FhrMkr3H1oGGvyCncfvipIqgmSaoKkmiCpJkiqCZJqgqSaXx8fv/+gv2asyU9096FhrMkzdx/eRZBUEyTVBEk1QVJNkFQTJNUESTVBUs2DFxlr8hPdfWi4+/AKY00+c/fhnYw1+czdh+8kSKoJkmqCpJogqSZIqgmSaoKkmiCp5kHR3YfvZKzJuxhr8hPdffjMWJNn7j48M9bkmbsPXxUk1QRJNUFSTZBUEyTVBEk1QVJNkFTz4M2MNWm4+/Cd3H14ZqzJV401eSd3Hz5z9+GZsSbvIkiqCZJqgqSaIKkmSKoJkmqCpJogqeaBvoWxJg13H97JWJPP3H145u7DuwiSaoKkmiCpJkiqCZJqgqSaIKnmgf6quw+vMNbkmbsPXzXW5F8z1uQV7j58VZBUEyTVBEk1QVJNkFQTJNUESTVBUs2DN3P34acZa/LM3Yfv5O5Dw1iT7yRIqgmSaoKkmiCpJkiqCZJqgqSaIKnmQdFYk59mrEnLWJNn7j581d2HZ8aavIu7D+8iSKoJkmqCpJogqSZIqgmSaoKkmiCp5tfHx+8/SKoIkmqCpJogqSZIqgmSaoKkmiCpJkiqCZJqgqSaIKkmSKoJkmqCpJogqSZIqvkfMobtbyCsoKYAAAAASUVORK5CYII=\" alt=\"Scan to text\"/>\n        <div class=\"qr-lbl\">Scan to text</div>\n      </div>\n      <div class=\"fline\"></div>\n      <div class=\"qr-block\">\n        <img src=\"data:image/png;base64,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\" alt=\"Scan to schedule\"/>\n        <div class=\"qr-lbl\">Scan to schedule</div>\n      </div>\n      <div class=\"fline\"></div>\n      <div>\n        <div class=\"cta-lbl\">Call or text</div>\n        <div class=\"cta-num\">(713) 469-2810</div>\n      </div>\n    </div>\n  </div>\n</div>\n\n<div class=\"bar\"></div>\n</div>\n</body>\n</html>";
-  frame.srcdoc = flyerHTML;
-  frame.onload = function() { scaleFlyerFrame(); };
-})();
+// Flyer tab uses native HTML panel
 
-function scaleFlyerFrame() {
-  var frame = document.getElementById('flyer-frame');
-  var container = frame ? frame.parentElement : null;
-  if (!frame || !container) return;
-  var containerW = container.offsetWidth;
-  var scale = containerW / 850;
-  frame.style.transform = 'scale(' + scale + ')';
-  frame.style.height = '1102px';
-  container.style.height = Math.round(1102 * scale) + 'px';
-}
-
-window.addEventListener('resize', scaleFlyerFrame);
 
 
 </script>
+
 </body>
 </html>
